@@ -1,70 +1,55 @@
-from playwright.sync_api import sync_playwright
-import gspread
-from google.oauth2.service_account import Credentials
-from datetime import datetime
-import json, os, re
-
-targets = [
-("篠塚大輝","https://x.com/ABCMART_INFO/status/2033696817473519907"),
-("猪俣周杜","https://x.com/ABCMART_INFO/status/2033696566016381225"),
-("橋本将生","https://x.com/ABCMART_INFO/status/2033696314236801343"),
-("原嘉孝","https://x.com/ABCMART_INFO/status/2033696062938943853"),
-("寺西拓人","https://x.com/ABCMART_INFO/status/2033695811071004930"),
-("松島聡","https://x.com/ABCMART_INFO/status/2033695560880824458"),
-("菊池風磨","https://x.com/ABCMART_INFO/status/2033695307821944843"),
-("佐藤勝利","https://x.com/ABCMART_INFO/status/2033695056226402795")
-]
-
-scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-
-creds_dict = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT"])
-creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-
-gc = gspread.authorize(creds)
-
-sheet = gc.open_by_key(
-"167kAxRTdIQjkyjW2uJx8KDiRUQ_aV4OLXFF6SqtbBPo"
-).worksheet("data")
-
+import re
 
 def parse_number(text):
-    text = text.replace(",", "")
-    if "万" in text:
-        return int(float(text.replace("万",""))*10000)
-    return int(re.findall(r"\d+", text)[0])
+    if not text:
+        return 0
+    # 不要な文字（カンマ、件数、表示など）を削除
+    text = text.replace(",", "").replace("件", "").replace("の", "").replace("表示", "")
+    
+    # 数字と小数点の部分だけ抽出 (例: "1.2万" -> "1.2", "万")
+    match = re.search(r"(\d+\.?\d*)([万億]?)", text)
+    if not match:
+        return 0
+    
+    num_part = float(match.group(1))
+    unit_part = match.group(2)
+    
+    if unit_part == "万":
+        return int(num_part * 10000)
+    elif unit_part == "億":
+        return int(num_part * 100000000)
+    
+    return int(num_part)
 
+# --- ループ内の処理 ---
+for talent, url in targets:
+    try:
+        page.goto(url, wait_until="networkidle")
+        page.wait_for_timeout(5000) # 念のための待機
 
-with sync_playwright() as p:
+        # 【デバッグ用】画面の状態を保存（GitHub ActionsのArtifactsで確認可能）
+        page.screenshot(path=f"debug_{talent}.png")
 
-    browser = p.chromium.launch()
-    page = browser.new_page()
+        # 各数値を aria-label から取得する
+        # Xの構造上、これらが最も安定して取得できるプロパティです
+        reply = parse_number(page.get_by_test_id("reply").first.get_attribute("aria-label"))
+        repost = parse_number(page.get_by_test_id("retweet").first.get_attribute("aria-label"))
+        like = parse_number(page.get_by_test_id("like").first.get_attribute("aria-label"))
+        
+        # ブックマークと表示回数は別途テキストから取得
+        # ※ブックマークボタンがない投稿もあるため try-except 推奨
+        try:
+            bookmark = parse_number(page.locator('a[href$="/bookmarks"]').first.inner_text())
+        except:
+            bookmark = 0
 
-    for talent, url in targets:
-
-        page.goto(url)
-        page.wait_for_timeout(5000)
-
-        article = page.locator("article").inner_text()
-
-        reply = parse_number(article.split("\n")[1])
-        repost = parse_number(article.split("\n")[2])
-        like = parse_number(article.split("\n")[3])
-        bookmark = parse_number(article.split("\n")[4])
-
-        views_text = page.locator("text=件の表示").inner_text()
+        # 表示回数（「1.5万 件の表示」などから抽出）
+        views_text = page.locator("text=件の表示").first.inner_text()
         views = parse_number(views_text)
 
-        now = datetime.utcnow().isoformat()
+        # スプレッドシートへの書き込み処理（以下略）
 
-        sheet.append_row([
-            now,
-            talent,
-            url,
-            reply,
-            repost,
-            like,
-            bookmark,
-            views
-        ])
-
-    browser.close()
+    except Exception as e:
+        print(f"Error processing {talent}: {e}")
+        page.screenshot(path=f"error_{talent}.png") # エラー時のみスクショ
+        continue # 次のタレントへ
