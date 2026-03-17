@@ -18,8 +18,17 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - run: playwright install
+      - run: playwright install chromium
 
       - run: python scraper.py
         env:
           GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+
+      # 実行後にスクリーンショットを保存する設定（1日間保持）
+      - name: Upload debug screenshots
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: debug-screenshots
+          path: ./*.png
+          retention-days: 1
