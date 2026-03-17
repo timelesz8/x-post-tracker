@@ -68,8 +68,15 @@ with sync_playwright() as p:
     for talent, url in targets:
         try:
             print(f"Processing: {talent}...")
-            page.goto(url, wait_until="networkidle")
-            page.wait_for_timeout(5000) # 描画待ち
+            # wait_until を "domcontentloaded"（最低限の読み込み）に変更
+            page.goto(url, wait_until="domcontentloaded")
+            
+            # 「投稿内容（article）」が表示されるまで最大15秒待つ
+            # これにより、networkidle よりも早く、かつ確実に次に進めます
+            page.wait_for_selector("article", timeout=15000)
+            
+            # 念のため少しだけ追加待機
+            page.wait_for_timeout(3000)
 
             # 念のため、全タレントのスクリーンショットを保存（デバッグ用）
             page.screenshot(path=f"debug_{talent}.png")
